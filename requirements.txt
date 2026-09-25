@@ -1,4 +1,4 @@
 streamlit
-geopandas
+streamlit-folium
+folium
 pandas
-shapely
