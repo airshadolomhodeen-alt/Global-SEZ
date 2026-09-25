@@ -1,6 +1,6 @@
 import streamlit as st
-import geopandas as gpd
 import pandas as pd
+import json
 
 # Page configuration
 st.set_page_config(
@@ -19,10 +19,22 @@ data_source = st.sidebar.radio(
     ["GeoJSON Spatial Data", "CSV Zones Data"]
 )
 
-# Cached function to load GeoJSON
+# Cached function to load GeoJSON safely using standard json
 @st.cache_data
 def load_geojson():
-    return gpd.read_file("ciip_sez_ntl_2017.geojson")
+    with open("ciip_sez_ntl_2017.geojson", "r", encoding="utf-8") as f:
+        data = json.load(f)
+    
+    # Extract features if it's a FeatureCollection
+    if "features" in data:
+        features = data["features"]
+        # Extract properties and discard complex geometries if they cause trouble
+        records = []
+        for feature in features:
+            props = feature.get("properties", {})
+            records.append(props)
+        return pd.DataFrame(records)
+    return pd.DataFrame()
 
 # Cached function to load CSV
 @st.cache_data
@@ -34,25 +46,11 @@ if data_source == "GeoJSON Spatial Data":
     st.subheader("Spatial Data View (`ciip_sez_ntl_2017.geojson`)")
     
     try:
-        gdf = load_geojson()
-        st.metric(label="Total Zones in GeoJSON", value=len(gdf))
-        
-        # Display map if point coordinates are available
-        try:
-            if 'geometry' in gdf.columns:
-                # Create temporary lat/lon columns if geometries are points
-                map_df = gdf.copy()
-                if map_df.geometry.geom_type.isin(['Point', 'MultiPoint']).any():
-                    map_df['lat'] = map_df.geometry.y
-                    map_df['lon'] = map_df.geometry.x
-                    st.write("### Map Overview")
-                    st.map(map_df[['lat', 'lon']].dropna())
-        except Exception:
-            pass
+        df = load_geojson()
+        st.metric(label="Total Zones in GeoJSON", value=len(df))
 
         st.write("### Data Table Preview")
-        # Show dataframe without geometry column for cleaner text display
-        st.dataframe(gdf.drop(columns='geometry', errors='ignore'))
+        st.dataframe(df)
         
     except Exception as e:
         st.error(f"Error loading GeoJSON file: {e}")
