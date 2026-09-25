@@ -1,98 +1,129 @@
-import json
+import folium
 import pandas as pd
 import streamlit as st
+from streamlit_folium import st_folium
 
-# Set page configuration
+# Page configuration
 st.set_page_config(
-    page_title="Dataset Viewer - Special Economic Zones",
+    page_title="Global Economic Zones",
     page_icon="🌍",
-    layout="wide",
+    layout="wide"
 )
 
+st.title("🌍 Global Economic Zones Dashboard")
+st.markdown("Explore economic zones and their classifications using the interactive map below.")
 
-# Load the full JSON data from file
+# 1. Load your economic zones data
 @st.cache_data
 def load_data():
-  try:
-    with open("dataset.json", "r", encoding="utf-8") as f:
-      return json.load(f)
-  except FileNotFoundError:
-    st.error(
-        "⚠️ 'dataset.json' not found. Please make sure the file is in the same"
-        " directory."
-    )
-    return None
+    zones_df = pd.read_csv('zones.csv')
+    return zones_df
 
+zones_df = load_data()
 
-data = load_data()
+# 2. Initialize map using Esri World Street Map
+m = folium.Map(
+    location=[12.8797, 121.7740], zoom_start=6, tiles='Esri.WorldStreetMap'
+)
 
-if data:
-  # Dashboard Header
-  st.title(f"🌍 {data.get('name', 'Dataset Viewer')}")
-  st.markdown("---")
+# 3. Add the ciip_sez_ntl_2017.geojson layer
+try:
+    folium.GeoJson(
+        'ciip_sez_ntl_2017.geojson',
+        name='SEZ Boundaries (GeoJSON)',
+        style_function=lambda x: {
+            'fillColor': '#3186cc',
+            'color': '#2b5c8f',
+            'weight': 1,
+            'fillOpacity': 0.4
+        }
+    ).add_to(m)
+except Exception as e:
+    st.sidebar.warning(f"GeoJSON layer could not be loaded: {e}")
 
-  # Sidebar for Navigation
-  st.sidebar.title("Navigation")
-  section = st.sidebar.radio(
-      "Go to",
-      [
-          "Overview",
-          "Identification & Metadata",
-          "Geographical Coverage",
-          "Raw JSON Viewer",
-      ],
-  )
+# 4. Define a distinct color palette for your categories
+color_palette = [
+    '#e41a1c',
+    '#377eb8',
+    '#4daf4a',
+    '#984ea3',
+    '#ff7f00',
+    '#ffff33',
+    '#a65628',
+    '#f781bf',
+    '#999999',
+    '#66c2a5',
+    '#fc8d62',
+    '#8da0cb',
+]
 
-  if section == "Overview":
-    st.header("Dataset Overview")
+category_column = 'NATURE'
+unique_categories = zones_df[category_column].dropna().unique() if category_column in zones_df.columns else []
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Status", data.get("status"))
-    col2.metric("Version", data.get("version_number"))
-    col3.metric("Dataset ID", data.get("dataset_unique_id"))
+category_colors = {
+    cat: color_palette[i % len(color_palette)]
+    for i, cat in enumerate(unique_categories)
+}
 
-    st.subheader("Description")
-    desc = data.get("identification", {}).get("description", "")
-    st.markdown(desc, unsafe_allow_html=True)
+# 5. Add markers with dynamic colors based on their classification
+if 'lat' in zones_df.columns and 'lon' in zones_df.columns:
+    for _, row in zones_df.iterrows():
+        if pd.isna(row['lat']) or pd.isna(row['lon']):
+            continue
 
-    st.subheader("Quick Links")
-    legacy_url = data.get("app_legacy_url")
-    if legacy_url:
-      st.markdown(f"🔗 [View Original Datacatalog Entry]({legacy_url})")
+        category_val = row.get(category_column, 'Unknown')
+        marker_color = category_colors.get(category_val, '#999999')
 
-  elif section == "Identification & Metadata":
-    st.header("Identification Metadata")
-    ident = data.get("identification", {})
+        popup_text = f"""
+            <b>Zone Name:</b> {row.get('ZONE_NAME', 'N/A')}<br>
+            <b>Classification:</b> {category_val}<br>
+            <b>Status:</b> {row.get('STATUS', 'N/A')}<br>
+            <b>City:</b> {row.get('CITY', 'N/A')}
+        """
 
-    st.text_input("Title", ident.get("title", ""))
-    st.text_input("Acronym", ident.get("acronym", ""))
-    st.text_input(
-        "Practice Name", ident.get("practice", {}).get("name", "")
-    )
-    st.text_input("Work Unit", ident.get("work_unit", {}).get("name", ""))
+        folium.CircleMarker(
+            location=[row['lat'], row['lon']],
+            radius=6,
+            color=marker_color,
+            fill=True,
+            fill_color=marker_color,
+            fill_opacity=0.85,
+            popup=folium.Popup(popup_text, max_width=300),
+        ).add_to(m)
 
-    st.subheader("Point of Contact / Team Members")
-    contacts = ident.get("point_of_contact", [])
-    if contacts:
-      st.dataframe(pd.DataFrame(contacts), use_container_width=True)
+# 6. Build a professional HTML legend positioned in the lower right corner
+legend_html = """
+<div style="
+    position: fixed; 
+    bottom: 40px; 
+    right: 20px; 
+    width: 220px; 
+    max-height: 180px;
+    overflow-y: auto;
+    background-color: rgba(255, 255, 255, 0.95); 
+    z-index: 9999; 
+    font-family: Arial, sans-serif;
+    font-size: 11px;
+    border: 1px solid #ccc; 
+    border-radius: 6px; 
+    padding: 10px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+    <p style="margin: 0 0 6px 0; font-weight: bold; font-size: 12px; color: #333; text-align: center; border-bottom: 1px solid #ddd; padding-bottom: 3px;">Zone Classifications</p>
+"""
 
-  elif section == "Geographical Coverage":
-    st.header("Geographical Extent & Coverage")
-    geo_coverage = data.get("geographical_extent", {}).get("coverage", [])
+for cat, color in category_colors.items():
+    legend_html += f"""
+    <div style="display: flex; align-items: center; margin-bottom: 5px;">
+        <span style="background: {color}; width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; flex-shrink: 0;"></span>
+        <span style="color: #444; line-height: 1.1; word-break: break-word;">{cat}</span>
+    </div>
+    """
 
-    st.info(f"Total coverage regions/countries listed: {len(geo_coverage)}")
+legend_html += '</div>'
 
-    if geo_coverage:
-      df_geo = pd.DataFrame(geo_coverage)
-      # Search bar for countries
-      search_term = st.text_input("🔍 Search country or region:")
-      if search_term:
-        df_geo = df_geo[
-            df_geo["name"].str.contains(search_term, case=False, na=False)
-        ]
+# Add legend and layer control to the map
+m.get_root().html.add_child(folium.Element(legend_html))
+folium.LayerControl().add_to(m)
 
-      st.dataframe(df_geo[["code", "name"]], use_container_width=True)
-
-  elif section == "Raw JSON Viewer":
-    st.header("Raw JSON Data")
-    st.json(data)
+# 7. Render the map inside Streamlit
+st_folium(m, width=1200, height=600, use_container_width=True)
